@@ -47,7 +47,7 @@ struct ViewerView: View {
             return .handled
         }
         .onAppear { focused = true }
-        .task(id: model.focused) { await load() }
+        .task(id: "\(model.focused?.path ?? "")|\(model.contentVersion)") { await load() }
         .onReceive(NotificationCenter.default.publisher(for: .zoomCommand)) { note in
             if let command = note.object as? ZoomCommand { zoom = command }
         }

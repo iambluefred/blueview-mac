@@ -55,6 +55,12 @@ struct ContentView: View {
                     Toggle(tr("Ascending", "遞增"), isOn: $model.ascending)
                 } label: { Label(tr("Sort", "排序"), systemImage: "arrow.up.arrow.down") }
                 .help(tr("Sort", "排序"))
+                Button { model.rotate(.counterClockwise) } label: { Label(tr("Rotate Left", "向左旋轉"), systemImage: "rotate.left") }
+                    .disabled(model.convertTargets.isEmpty)
+                    .help(tr("Rotate left (⌘L)", "向左旋轉（⌘L）"))
+                Button { model.rotate(.clockwise) } label: { Label(tr("Rotate Right", "向右旋轉"), systemImage: "rotate.right") }
+                    .disabled(model.convertTargets.isEmpty)
+                    .help(tr("Rotate right (⌘R)", "向右旋轉（⌘R）"))
                 Button { model.showConvert = true } label: { Label(tr("Convert", "轉檔"), systemImage: "arrow.triangle.2.circlepath") }
                     .disabled(model.convertTargets.isEmpty || model.isConverting)
                     .help(tr("Convert selected photos (JPEG / HEIC / PNG / TIFF)", "轉換選取的照片（JPEG／HEIC／PNG／TIFF）"))
@@ -107,7 +113,7 @@ private struct SidebarView: View {
 
     private func row(_ name: String, icon: String, url: URL) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: icon).foregroundStyle(.tint).frame(width: 18)
+            Image(nsImage: FolderIcon.icon(for: url)).resizable().scaledToFit().frame(width: 18, height: 18)
             Text(name).lineLimit(1)
             Spacer(minLength: 0)
         }

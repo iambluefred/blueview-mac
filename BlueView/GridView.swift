@@ -14,6 +14,15 @@ struct GridView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: columns), spacing: 12) {
+                    ForEach(model.subfolders, id: \.self) { folder in
+                        FolderCell(url: folder, size: thumbSize)
+                            .onTapGesture(count: 2) { model.open(folder) }
+                            .contextMenu {
+                                Button(tr("Open", "開啟")) { model.open(folder) }
+                                Button(tr("Show in Finder", "在 Finder 中顯示")) { NSWorkspace.shared.activateFileViewerSelecting([folder]) }
+                            }
+                            .help(tr("Double-click to open", "點兩下開啟"))
+                    }
                     ForEach(model.files) { file in
                         Thumbnail(file: file, size: thumbSize, isSelected: model.selection.contains(file.url), isFocused: model.focused == file.url)
                             .id(file.url)
@@ -25,6 +34,15 @@ struct GridView: View {
                             })
                             .contextMenu {
                                 Button(tr("Open", "開啟")) { model.openViewer(file.url) }
+                                Button(tr("Rotate Left", "向左旋轉")) {
+                                    if !model.selection.contains(file.url) { model.select(file.url) }
+                                    model.rotate(.counterClockwise)
+                                }
+                                Button(tr("Rotate Right", "向右旋轉")) {
+                                    if !model.selection.contains(file.url) { model.select(file.url) }
+                                    model.rotate(.clockwise)
+                                }
+                                Divider()
                                 Button(tr("Convert…", "轉檔…")) {
                                     if !model.selection.contains(file.url) { model.select(file.url) }
                                     model.showConvert = true
@@ -55,7 +73,7 @@ struct GridView: View {
             .onKeyPress(.return) { model.openViewer(); return .handled }
             .onKeyPress(.space) { model.openViewer(); return .handled }
             .overlay {
-                if model.files.isEmpty {
+                if model.files.isEmpty && model.subfolders.isEmpty {
                     ContentUnavailableView(tr("No photos in this folder", "這個資料夾沒有照片"), systemImage: "photo.on.rectangle",
                                            description: Text(tr("Pick another folder on the left, or drop a folder here.", "從左邊選其他資料夾，或把資料夾拖到這裡。")))
                 }
@@ -104,10 +122,42 @@ private struct Thumbnail: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(isSelected ? Color.accentColor.opacity(0.22) : .clear))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(isFocused ? Color.accentColor : .clear, lineWidth: 2))
         .contentShape(Rectangle())
-        .task(id: "\(file.url.path)|\(Int(size / 60))") {
+        .task(id: "\(file.url.path)|\(Int(size / 60))|\(file.modified.timeIntervalSince1970)") {
             // 縮圖解析度依格子大小分段（Retina 要兩倍像素）
             let pixels = Int((size / 60).rounded(.up) * 60 * 2)
-            image = await ThumbnailLoader.shared.thumbnail(file.url, maxSide: pixels)
+            image = await ThumbnailLoader.shared.thumbnail(file.url, maxSide: pixels, version: file.modified)
         }
+    }
+}
+
+/// 資料夾：用 macOS 的真實圖示（包括自訂的資料夾圖示）
+private struct FolderCell: View {
+    let url: URL
+    let size: Double
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(nsImage: FolderIcon.icon(for: url))
+                .resizable()
+                .scaledToFit()
+                .frame(height: size * 0.75 * 0.8)
+                .frame(height: size * 0.75)
+            Text(url.lastPathComponent).font(.caption).lineLimit(1).truncationMode(.middle)
+        }
+        .padding(6)
+        .contentShape(Rectangle())
+    }
+}
+
+/// 系統圖示快取
+enum FolderIcon {
+    private static let cache = NSCache<NSString, NSImage>()
+
+    static func icon(for url: URL) -> NSImage {
+        if let cached = cache.object(forKey: url.path as NSString) { return cached }
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        icon.size = NSSize(width: 256, height: 256)
+        cache.setObject(icon, forKey: url.path as NSString)
+        return icon
     }
 }

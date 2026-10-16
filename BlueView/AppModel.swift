@@ -13,6 +13,8 @@ final class AppModel {
     /// 目前焦點的照片（右側資訊、看圖模式顯示這張）
     var focused: URL?
     var mode: Mode = .grid
+    /// 檔案被修改後遞增，讓看圖畫面重新載入
+    private(set) var contentVersion = 0
 
     var sort: SortOrder { didSet { resort(); save() } }
     var ascending: Bool { didSet { resort(); save() } }
@@ -178,6 +180,76 @@ final class AppModel {
 
     func openWithDefaultApp() {
         if let focused { NSWorkspace.shared.open(focused) }
+    }
+
+    // MARK: - 旋轉
+
+    /// 已旋轉的紀錄，可以用 ⌘Z 還原、⇧⌘Z 重做
+    private(set) var undoStack: [(urls: [URL], direction: Rotator.Direction)] = []
+    private(set) var redoStack: [(urls: [URL], direction: Rotator.Direction)] = []
+
+    var undoTitle: String? { undoStack.last.map { tr("Undo Rotate (\($0.urls.count))", "還原旋轉（\($0.urls.count) 張）") } }
+    var redoTitle: String? { redoStack.last.map { tr("Redo Rotate (\($0.urls.count))", "重做旋轉（\($0.urls.count) 張）") } }
+
+    /// 旋轉選取的照片（看圖模式下旋轉目前這張）
+    func rotate(_ direction: Rotator.Direction) {
+        let targets = mode == .viewer ? [focused].compactMap { $0 } : convertTargets
+        guard !targets.isEmpty else { return }
+        apply(targets, direction, record: .undo)
+    }
+
+    func undoRotate() {
+        guard let last = undoStack.popLast() else { return }
+        apply(last.urls, opposite(last.direction), record: .redo, original: last.direction)
+    }
+
+    func redoRotate() {
+        guard let last = redoStack.popLast() else { return }
+        apply(last.urls, last.direction, record: .undoKeepRedo)
+    }
+
+    private enum Record { case undo, redo, undoKeepRedo }
+
+    private func opposite(_ d: Rotator.Direction) -> Rotator.Direction { d == .clockwise ? .counterClockwise : .clockwise }
+
+    private func apply(_ targets: [URL], _ direction: Rotator.Direction, record: Record, original: Rotator.Direction? = nil) {
+        Task.detached(priority: .userInitiated) {
+            var failures: [String] = []
+            var done: [URL] = []
+            for url in targets {
+                do {
+                    try Rotator.rotate(url, direction)
+                    done.append(url)
+                } catch {
+                    failures.append("\(url.lastPathComponent)：\(error.localizedDescription)")
+                }
+            }
+            await ImagePipeline.shared.invalidate(targets)
+            let message = failures.joined(separator: "\n")
+            let rotated = done
+            await MainActor.run {
+                if !rotated.isEmpty {
+                    switch record {
+                    case .undo:
+                        self.undoStack.append((rotated, direction))
+                        self.redoStack.removeAll()
+                    case .redo:
+                        self.redoStack.append((rotated, original ?? direction))
+                    case .undoKeepRedo:
+                        self.undoStack.append((rotated, direction))
+                    }
+                    self.statusMessage = tr("Rotated \(rotated.count) photo(s). ⌘Z to undo.", "已旋轉 \(rotated.count) 張，可按 ⌘Z 還原。")
+                }
+                self.contentVersion += 1
+                self.reload()
+                if !message.isEmpty {
+                    let alert = NSAlert()
+                    alert.messageText = tr("Some photos were not rotated", "有些照片沒有旋轉")
+                    alert.informativeText = message
+                    alert.runModal()
+                }
+            }
+        }
     }
 
     // MARK: - 轉檔

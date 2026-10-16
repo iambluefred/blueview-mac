@@ -20,10 +20,22 @@ struct BlueViewApp: App {
                     .disabled(model.convertTargets.isEmpty || model.isConverting)
                 Divider()
                 Button(tr("Show in Finder", "在 Finder 中顯示"), action: model.revealInFinder).keyboardShortcut("r", modifiers: [.command, .shift])
-                Button(tr("Reload Folder", "重新整理資料夾"), action: model.reload).keyboardShortcut("r")
+                Button(tr("Reload Folder", "重新整理資料夾"), action: model.reload).keyboardShortcut("r", modifiers: [.command, .option])
+            }
+            CommandGroup(replacing: .undoRedo) {
+                Button(model.undoTitle ?? tr("Undo", "還原"), action: model.undoRotate)
+                    .keyboardShortcut("z").disabled(model.undoTitle == nil)
+                Button(model.redoTitle ?? tr("Redo", "重做"), action: model.redoRotate)
+                    .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(model.redoTitle == nil)
             }
             CommandGroup(after: .textEditing) {
                 Button(tr("Select All Photos", "全選照片"), action: model.selectAll).keyboardShortcut("a", modifiers: [.command, .option])
+            }
+            CommandMenu(tr("Image", "圖片")) {
+                Button(tr("Rotate Left", "向左旋轉")) { model.rotate(.counterClockwise) }
+                    .keyboardShortcut("l").disabled(model.convertTargets.isEmpty)
+                Button(tr("Rotate Right", "向右旋轉")) { model.rotate(.clockwise) }
+                    .keyboardShortcut("r").disabled(model.convertTargets.isEmpty)
             }
             CommandMenu(tr("Go", "前往")) {
                 Button(tr("Back", "上一頁"), action: model.goBack).keyboardShortcut("[").disabled(!model.canGoBack)

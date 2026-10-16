@@ -29,8 +29,9 @@ final class ThumbnailLoader: @unchecked Sendable {
         return CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary)
     }
 
-    func thumbnail(_ url: URL, maxSide: Int) async -> NSImage? {
-        let key = "\(maxSide)|\(url.path)"
+    /// version 用檔案修改時間，檔案被旋轉或修改後會重新產生縮圖
+    func thumbnail(_ url: URL, maxSide: Int, version: Date = .distantPast) async -> NSImage? {
+        let key = "\(maxSide)|\(version.timeIntervalSince1970)|\(url.path)"
         if let cached = cache.object(forKey: key as NSString) { return cached }
         return await withCheckedContinuation { continuation in
             queue.addOperation {
@@ -131,6 +132,14 @@ actor ImagePipeline {
     }
 
     func isCached(_ url: URL) -> Bool { cache[url] != nil }
+
+    /// 檔案被修改（例如旋轉）後丟掉舊的解碼結果
+    func invalidate(_ urls: [URL]) {
+        for url in urls {
+            cache[url] = nil
+            order.removeAll { $0 == url }
+        }
+    }
 
     private func store(_ url: URL, _ image: DecodedImage) {
         cache[url] = image
