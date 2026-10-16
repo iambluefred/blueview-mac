@@ -7,12 +7,14 @@ struct ViewerView: View {
     @State private var decoded: DecodedImage?
     @State private var loadInfo = ""
     @State private var zoom = ZoomCommand.fit
+    /// 目前縮放比例（1 = 100%，一個影像像素對一個螢幕像素）
+    @State private var scale: CGFloat = 1
     @FocusState private var focused: Bool
 
     var body: some View {
         ZStack(alignment: .bottom) {
             Color.black
-            ZoomableImage(decoded: decoded, command: $zoom) { needFull in
+            ZoomableImage(decoded: decoded, command: $zoom, onScale: { scale = $0 }) { needFull in
                 guard needFull, let url = model.focused, decoded?.isFullResolution == false else { return }
                 Task {
                     if let full = await ImagePipeline.shared.image(url, fullResolution: true), model.focused == url {
@@ -27,12 +29,15 @@ struct ViewerView: View {
                     Text("\(index + 1) / \(model.files.count)").monospacedDigit()
                     if !loadInfo.isEmpty { Text(loadInfo).monospacedDigit() }
                     Spacer()
-                    Text(tr("← → next · Esc back · ⌘0 fit · ⌘1 100%", "← → 切換・Esc 返回・⌘0 符合視窗・⌘1 100%"))
+                    Text(tr("Scroll wheel / pinch to zoom · double-click fit ↔ 100%", "滾輪／捏合縮放・雙擊 符合 ↔ 100%"))
+                        .foregroundStyle(.white.opacity(0.6))
+                    zoomControls
                 }
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.85))
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(.black.opacity(0.55))
+                .environment(\.colorScheme, .dark)
             }
         }
         .focusable()
@@ -51,6 +56,34 @@ struct ViewerView: View {
         .onReceive(NotificationCenter.default.publisher(for: .zoomCommand)) { note in
             if let command = note.object as? ZoomCommand { zoom = command }
         }
+    }
+
+    /// 底部列的縮放控制：− 百分比 ＋ 符合 100%
+    private var zoomControls: some View {
+        HStack(spacing: 2) {
+            Button { zoom = .zoomOut } label: { Image(systemName: "minus.magnifyingglass") }
+                .help(tr("Zoom Out (⌘−)", "縮小（⌘−）"))
+            Menu {
+                ForEach([0.25, 0.5, 1, 2, 4, 8], id: \.self) { value in
+                    Button("\(Int(value * 100))%") { zoom = .scale(value) }
+                }
+                Divider()
+                Button(tr("Zoom to Fit", "符合視窗")) { zoom = .fit }
+            } label: {
+                Text("\(Int((scale * 100).rounded()))%").monospacedDigit().frame(minWidth: 44)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            Button { zoom = .zoomIn } label: { Image(systemName: "plus.magnifyingglass") }
+                .help(tr("Zoom In (⌘+)", "放大（⌘+）"))
+            Button(tr("Fit", "符合")) { zoom = .fit }
+                .help(tr("Zoom to Fit (⌘0)", "符合視窗（⌘0）"))
+            Button("100%") { zoom = .actual }
+                .help(tr("Actual Size (⌘1)", "實際大小（⌘1）"))
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.white)
     }
 
     private func load() async {
@@ -75,23 +108,27 @@ struct ViewerView: View {
 
 enum ZoomCommand: Equatable {
     case fit, actual, zoomIn, zoomOut
+    /// 指定比例，1 = 100%
+    case scale(CGFloat)
 }
 
 extension Notification.Name {
     static let zoomCommand = Notification.Name("BlueViewZoomCommand")
 }
 
-/// NSScrollView 包裝：捏合／⌘± 縮放、拖曳平移、小於視窗時置中
+/// NSScrollView 包裝：捏合／滾輪／⌘± 縮放、雙擊切換符合視窗與 100%、小於視窗時置中
 private struct ZoomableImage: NSViewRepresentable {
     let decoded: DecodedImage?
     @Binding var command: ZoomCommand
+    /// 縮放比例改變時回報（1 = 100%）
+    let onScale: (CGFloat) -> Void
     /// 放大到需要原始解析度時呼叫
     let needsFullResolution: (Bool) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+        let scroll = ZoomScrollView()
         scroll.contentView = CenteringClipView()
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = true
@@ -101,7 +138,9 @@ private struct ZoomableImage: NSViewRepresentable {
         scroll.maxMagnification = 16
         scroll.drawsBackground = true
         scroll.backgroundColor = .black
-        let imageView = NSImageView()
+        let imageView = ZoomImageView()
+        imageView.onDoubleClick = { [weak coordinator = context.coordinator] point in coordinator?.toggleFit(at: point) }
+        scroll.onWheelZoom = { [weak coordinator = context.coordinator] factor, point in coordinator?.zoom(by: factor, at: point) }
         imageView.imageScaling = .scaleAxesIndependently
         imageView.animates = true
         scroll.documentView = imageView
@@ -174,17 +213,47 @@ private struct ZoomableImage: NSViewRepresentable {
             case .zoomOut:
                 scroll.magnification = max(scroll.magnification / 1.5, scroll.minMagnification)
                 isFit = false
+            case .scale(let value):
+                scroll.magnification = min(max(value, scroll.minMagnification), scroll.maxMagnification)
+                isFit = false
             }
+            changed()
+        }
+
+        /// 滾輪縮放：以游標位置為中心
+        func zoom(by factor: CGFloat, at point: NSPoint) {
+            guard let scroll, currentSize.width > 0 else { return }
+            let target = min(max(scroll.magnification * factor, scroll.minMagnification), scroll.maxMagnification)
+            scroll.setMagnification(target, centeredAt: point)
+            isFit = false
+            changed()
+        }
+
+        /// 雙擊：符合視窗時放大到 100%（以點擊處為中心），否則回到符合視窗
+        func toggleFit(at point: NSPoint) {
+            guard let scroll else { return }
+            if isFit || abs(scroll.magnification - fitMagnification) < 0.001 {
+                scroll.setMagnification(1, centeredAt: point)
+                isFit = false
+            } else {
+                scroll.magnification = fitMagnification
+                isFit = true
+            }
+            changed()
+        }
+
+        private func changed() {
             checkResolution()
+            if let scroll { let value = scroll.magnification; DispatchQueue.main.async { self.parent.onScale(value) } }
         }
 
         @objc func magnificationChanged() {
             isFit = false
-            checkResolution()
+            changed()
         }
 
         @objc func frameChanged() {
-            if isFit { scroll?.magnification = fitMagnification }
+            if isFit { scroll?.magnification = fitMagnification; changed() }
         }
 
         /// 顯示的像素比解碼的多時，要求原始解析度
@@ -193,6 +262,36 @@ private struct ZoomableImage: NSViewRepresentable {
             let backing = scroll.window?.backingScaleFactor ?? 2
             let shownPixels = currentSize.width * scroll.magnification * backing
             parent.needsFullResolution(shownPixels > CGFloat(image.width) * 1.05)
+        }
+    }
+}
+
+/// 滑鼠滾輪（一格一格的）用來縮放；觸控板的雙指捲動仍是平移，捏合縮放
+private final class ZoomScrollView: NSScrollView {
+    var onWheelZoom: ((CGFloat, NSPoint) -> Void)?
+
+    override func scrollWheel(with event: NSEvent) {
+        let isMouseWheel = !event.hasPreciseScrollingDeltas && event.phase.isEmpty && event.momentumPhase.isEmpty
+        guard isMouseWheel || event.modifierFlags.contains(.command), let doc = documentView else {
+            super.scrollWheel(with: event)
+            return
+        }
+        let delta = event.scrollingDeltaY
+        guard delta != 0 else { return }
+        let factor = pow(1.15, delta > 0 ? 1.0 : -1.0)
+        onWheelZoom?(factor, doc.convert(event.locationInWindow, from: nil))
+    }
+}
+
+/// 雙擊回報點擊位置（影像座標）
+private final class ZoomImageView: NSImageView {
+    var onDoubleClick: ((NSPoint) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            onDoubleClick?(convert(event.locationInWindow, from: nil))
+        } else {
+            super.mouseDown(with: event)
         }
     }
 }

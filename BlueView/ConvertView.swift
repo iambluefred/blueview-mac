@@ -66,7 +66,7 @@ struct ConvertView: View {
                         Button(tr("Choose…", "選擇…"), action: model.chooseConvertOutput)
                     }
                     if !model.convertOptions.outputPath.isEmpty {
-                        Button(tr("Use a “Converted” folder next to the photos", "改回照片旁邊的「轉檔」資料夾")) { model.convertOptions.outputPath = "" }
+                        Button(tr("Use a “Converted” folder next to the photos", "改回照片旁邊的「Converted」資料夾")) { model.convertOptions.outputPath = "" }
                             .buttonStyle(.link)
                     }
                     Toggle(tr("Overwrite existing files", "覆蓋已存在的檔案"), isOn: o.overwrite)

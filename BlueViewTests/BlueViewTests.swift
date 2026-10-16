@@ -235,3 +235,34 @@ final class ListModeTests: XCTestCase {
         XCTAssertEqual(model.mode, .grid)
     }
 }
+
+/// 真實相機 RAW 轉 JPEG（需要 BLUEVIEW_RAW 指向 RAW 資料夾；輸出只寫到暫存資料夾）
+final class RealRawConvertTests: XCTestCase {
+    func testConvertRealRawWithBothEngines() throws {
+        guard let path = ProcessInfo.processInfo.environment["BLUEVIEW_RAW"] else { throw XCTSkip("BLUEVIEW_RAW not set") }
+        let raws = FolderScanner.images(in: URL(fileURLWithPath: path)).map(\.url).filter(ImageFormats.isRaw).prefix(5)
+        XCTAssertFalse(raws.isEmpty)
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("bv-raw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: out) }
+        for engine in RawEngine.allCases {
+            var options = ConvertOptions()
+            options.rawEngine = engine
+            options.minPreviewSide = 0
+            for src in raws {
+                let dest = Converter.destination(for: src, in: out.appendingPathComponent(engine.rawValue), format: .jpeg)
+                let start = Date()
+                let outcome = try Converter.convert(src, to: dest, options: options)
+                let ms = Date().timeIntervalSince(start) * 1000
+                let source = try XCTUnwrap(CGImageSourceCreateWithURL(dest as CFURL, nil))
+                let props = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+                let w = props[kCGImagePropertyPixelWidth] as? Int ?? 0, h = props[kCGImagePropertyPixelHeight] as? Int ?? 0
+                let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+                let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any]
+                XCTAssertGreaterThan(max(w, h), 1000, src.lastPathComponent)
+                XCTAssertNotNil(tiff?[kCGImagePropertyTIFFModel], "相機型號要保留")
+                XCTAssertNotNil(exif?[kCGImagePropertyExifDateTimeOriginal], "拍攝時間要保留")
+                print(String(format: "RAW %@ %@ → %dx%d %.0f ms %@", engine.rawValue, src.lastPathComponent, w, h, ms, String(describing: outcome)))
+            }
+        }
+    }
+}

@@ -289,7 +289,7 @@ final class AppModel {
 
     var convertOutputFolder: URL? {
         if !convertOptions.outputPath.isEmpty { return URL(fileURLWithPath: convertOptions.outputPath) }
-        return folder?.appendingPathComponent(tr("Converted", "轉檔"))
+        return folder?.appendingPathComponent("Converted")
     }
 
     func chooseConvertOutput() {
