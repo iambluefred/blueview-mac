@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 縮圖格：點一下選取、⌘ 加選、⇧ 範圍選取、雙擊或 Return 開圖、方向鍵移動
 struct GridView: View {
@@ -116,7 +117,7 @@ private struct Thumbnail: View {
                         .background(Capsule().fill(.orange)).foregroundStyle(.white).padding(4)
                 }
             }
-            Text(file.name).font(.caption).lineLimit(1).truncationMode(.middle)
+            FileNameLabel(url: file.url).font(.caption)
         }
         .padding(6)
         .background(RoundedRectangle(cornerRadius: 8).fill(isSelected ? Color.accentColor.opacity(0.22) : .clear))
@@ -159,5 +160,39 @@ enum FolderIcon {
         icon.size = NSSize(width: 256, height: 256)
         cache.setObject(icon, forKey: url.path as NSString)
         return icon
+    }
+}
+
+/// 檔案類型圖示（依副檔名，與 Finder 相同），快取起來大量顯示也很快
+enum FileTypeIcon {
+    private static let cache = NSCache<NSString, NSImage>()
+
+    static func icon(for url: URL) -> NSImage {
+        let ext = url.pathExtension.lowercased()
+        if let cached = cache.object(forKey: ext as NSString) { return cached }
+        let icon: NSImage
+        if let type = UTType(filenameExtension: ext) {
+            icon = NSWorkspace.shared.icon(for: type)
+        } else {
+            icon = NSWorkspace.shared.icon(forFile: url.path)
+        }
+        cache.setObject(icon, forKey: ext as NSString)
+        return icon
+    }
+}
+
+/// 檔名＋檔案類型圖示
+struct FileNameLabel: View {
+    let url: URL
+    var iconSize: CGFloat = 14
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(nsImage: FileTypeIcon.icon(for: url))
+                .resizable()
+                .interpolation(.high)
+                .frame(width: iconSize, height: iconSize)
+            Text(url.lastPathComponent).lineLimit(1).truncationMode(.middle)
+        }
     }
 }

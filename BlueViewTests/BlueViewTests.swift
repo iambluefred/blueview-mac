@@ -191,3 +191,47 @@ final class SpeedTests: XCTestCase {
         print(String(format: "SPEED thumbnail360 median %.1f ms, screen2560 median %.1f ms (n=%d)", median(thumb), median(screen), files.count))
     }
 }
+
+@MainActor
+final class FileTypeIconTests: XCTestCase {
+    func testIconsForCommonFormatsAreCachedPerExtension() {
+        let jpg = FileTypeIcon.icon(for: URL(fileURLWithPath: "/tmp/a.JPG"))
+        let jpg2 = FileTypeIcon.icon(for: URL(fileURLWithPath: "/tmp/b.jpg"))
+        XCTAssertTrue(jpg === jpg2, "同一種副檔名要共用同一個圖示（不分大小寫）")
+        for ext in ["png", "heic", "cr3", "nef", "tif"] {
+            let icon = FileTypeIcon.icon(for: URL(fileURLWithPath: "/tmp/x.\(ext)"))
+            XCTAssertGreaterThan(icon.size.width, 0, ext)
+        }
+        XCTAssertFalse(FileTypeIcon.icon(for: URL(fileURLWithPath: "/tmp/x.png")) === jpg, "不同格式應該是不同的圖示")
+    }
+}
+
+@MainActor
+final class ListModeTests: XCTestCase {
+    func testAllEntriesIncludeNonImagesWithFoldersFirst() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("bv-list-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("Zoo"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Fixture.jpeg(width: 10, height: 10).write(to: dir.appendingPathComponent("b.jpg"))
+        try Data("x".utf8).write(to: dir.appendingPathComponent("a-notes.txt"))
+        try Data("%PDF".utf8).write(to: dir.appendingPathComponent("c.pdf"))
+        try Data().write(to: dir.appendingPathComponent(".hidden"))
+
+        let entries = FolderScanner.allEntries(in: dir)
+        XCTAssertEqual(entries.map(\.name), ["Zoo", "a-notes.txt", "b.jpg", "c.pdf"], "資料夾在最前面，非圖片也要列出，隱藏檔不列")
+        XCTAssertTrue(entries[0].isFolder)
+        XCTAssertEqual(entries.filter(\.isImage).map(\.name), ["b.jpg"])
+        XCTAssertFalse(entries[1].kind.isEmpty)
+    }
+
+    func testModeSwitchingReturnsToPreviousBrowseMode() {
+        let model = AppModel()
+        model.setBrowseMode(.list)
+        XCTAssertEqual(model.mode, .list)
+        model.mode = .viewer
+        model.closeViewer()
+        XCTAssertEqual(model.mode, .list, "從單張返回時要回到列表")
+        model.setBrowseMode(.grid)
+        XCTAssertEqual(model.mode, .grid)
+    }
+}

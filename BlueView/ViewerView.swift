@@ -23,7 +23,7 @@ struct ViewerView: View {
             }
             if let file = model.focusedFile, let index = model.focusedIndex {
                 HStack(spacing: 10) {
-                    Text(file.name).fontWeight(.medium)
+                    FileNameLabel(url: file.url, iconSize: 16).fontWeight(.medium)
                     Text("\(index + 1) / \(model.files.count)").monospacedDigit()
                     if !loadInfo.isEmpty { Text(loadInfo).monospacedDigit() }
                     Spacer()

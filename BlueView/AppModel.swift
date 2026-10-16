@@ -4,7 +4,7 @@ import Observation
 @MainActor
 @Observable
 final class AppModel {
-    enum Mode { case grid, viewer }
+    enum Mode { case grid, list, viewer }
 
     private(set) var folder: URL?
     private(set) var files: [ImageFile] = []
@@ -13,6 +13,10 @@ final class AppModel {
     /// 目前焦點的照片（右側資訊、看圖模式顯示這張）
     var focused: URL?
     var mode: Mode = .grid
+    /// 看圖前所在的瀏覽方式（縮圖或列表），關閉看圖時回到這裡
+    private var browseMode: Mode = .grid
+    /// 列表模式：資料夾裡所有的檔案（含非圖片）
+    private(set) var entries: [FileEntry] = []
     /// 檔案被修改後遞增，讓看圖畫面重新載入
     private(set) var contentVersion = 0
 
@@ -60,7 +64,7 @@ final class AppModel {
         folder = url
         selection = []
         focused = nil
-        mode = .grid
+        mode = browseMode
         reload()
         save()
     }
@@ -71,10 +75,12 @@ final class AppModel {
         Task.detached(priority: .userInitiated) {
             let found = FolderScanner.images(in: url)
             let subs = FolderScanner.subfolders(of: url)
+            let all = FolderScanner.allEntries(in: url)
             await MainActor.run {
                 guard self.folder == url else { return }
                 self.files = FolderScanner.sorted(found, by: self.sort, ascending: self.ascending)
                 self.subfolders = subs
+                self.entries = all
                 if self.focused == nil { self.focused = self.files.first?.url }
                 self.selection = self.selection.filter { s in self.files.contains { $0.url == s } }
             }
@@ -155,14 +161,35 @@ final class AppModel {
         if mode == .viewer { prefetchAround() }
     }
 
+    func setBrowseMode(_ newMode: Mode) {
+        guard newMode != .viewer else { return openViewer() }
+        browseMode = newMode
+        mode = newMode
+    }
+
+    /// 列表中點兩下：資料夾進入、照片開單張、其他檔案用預設 App 開啟
+    func activate(_ url: URL) {
+        guard let entry = entries.first(where: { $0.url == url }) else { return }
+        if entry.isFolder { open(url) }
+        else if entry.isImage { openViewer(url) }
+        else { NSWorkspace.shared.open(url) }
+    }
+
+    /// 目前選取的非圖片檔（右側顯示基本資訊）
+    var focusedEntry: FileEntry? {
+        guard let focused else { return nil }
+        return entries.first { $0.url == focused }
+    }
+
     func openViewer(_ url: URL? = nil) {
+        if mode != .viewer { browseMode = mode }
         if let url { select(url) }
         guard focused != nil else { return }
         mode = .viewer
         prefetchAround()
     }
 
-    func closeViewer() { mode = .grid }
+    func closeViewer() { mode = browseMode }
 
     /// 預先解碼前後各兩張
     func prefetchAround() {

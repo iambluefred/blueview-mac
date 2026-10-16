@@ -10,13 +10,14 @@ struct ContentView: View {
     var body: some View {
         // 三欄直接並排（寬度自己控制，13 吋螢幕也不會被裁切）
         HStack(spacing: 0) {
-            if showSidebar && model.mode == .grid {
+            if showSidebar && model.mode != .viewer {
                 SidebarView(model: model).frame(width: 210)
                 Divider()
             }
             Group {
                 switch model.mode {
                 case .grid: GridView(model: model, thumbSize: thumbSize)
+                case .list: ListView(model: model)
                 case .viewer: ViewerView(model: model)
                 }
             }
@@ -41,13 +42,14 @@ struct ContentView: View {
                     .disabled(!model.canGoUp).help(tr("Enclosing folder", "上一層資料夾"))
             }
             ToolbarItemGroup {
-                Picker(tr("View", "顯示"), selection: Binding(get: { model.mode == .grid ? 0 : 1 },
-                                                              set: { $0 == 0 ? model.closeViewer() : model.openViewer() })) {
-                    Image(systemName: "square.grid.2x2").tag(0)
-                    Image(systemName: "photo").tag(1)
+                Picker(tr("View", "顯示"), selection: Binding(get: { model.mode },
+                                                              set: { model.setBrowseMode($0) })) {
+                    Image(systemName: "square.grid.2x2").tag(AppModel.Mode.grid)
+                    Image(systemName: "list.bullet").tag(AppModel.Mode.list)
+                    Image(systemName: "photo").tag(AppModel.Mode.viewer)
                 }
                 .pickerStyle(.segmented)
-                .help(tr("Grid / single photo", "縮圖／單張"))
+                .help(tr("Grid / list (all files) / single photo", "縮圖／列表（所有檔案）／單張"))
                 Menu {
                     Picker(tr("Sort by", "排序方式"), selection: $model.sort) {
                         ForEach(SortOrder.allCases) { Text($0.label).tag($0) }
@@ -143,7 +145,11 @@ private struct StatusBar: View {
             if model.selection.count > 1 {
                 Text(tr("\(model.selection.count) selected", "已選取 \(model.selection.count) 張"))
             }
-            Text(tr("\(model.files.count) photos", "\(model.files.count) 張")).monospacedDigit()
+            if model.mode == .list {
+                Text(tr("\(model.entries.count) items, \(model.files.count) photos", "\(model.entries.count) 個項目，照片 \(model.files.count) 張")).monospacedDigit()
+            } else {
+                Text(tr("\(model.files.count) photos", "\(model.files.count) 張")).monospacedDigit()
+            }
             if model.mode == .grid {
                 Image(systemName: "photo").imageScale(.small)
                 Slider(value: $thumbSize, in: 90...360).frame(width: 110)

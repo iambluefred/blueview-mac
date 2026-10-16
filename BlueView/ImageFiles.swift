@@ -78,3 +78,38 @@ enum FolderScanner {
         return ascending ? result : result.reversed()
     }
 }
+
+/// 列表模式的一個項目（任何檔案或資料夾）
+struct FileEntry: Identifiable, Hashable {
+    var id: URL { url }
+    let url: URL
+    let name: String
+    let isFolder: Bool
+    let isImage: Bool
+    let size: Int64
+    let modified: Date
+    let kind: String
+
+    /// 資料夾排最前面，用 0；其他用 1（給表格排序用）
+    var folderRank: Int { isFolder ? 0 : 1 }
+}
+
+extension FolderScanner {
+    static func allEntries(in folder: URL) -> [FileEntry] {
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey, .fileSizeKey, .contentModificationDateKey, .localizedTypeDescriptionKey]
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else {
+            return []
+        }
+        return urls.compactMap { url in
+            guard let v = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
+            let isFolder = v.isDirectory == true && v.isPackage != true
+            return FileEntry(url: url, name: url.lastPathComponent, isFolder: isFolder, isImage: !isFolder && ImageFormats.isImage(url),
+                             size: Int64(v.fileSize ?? 0), modified: v.contentModificationDate ?? .distantPast,
+                             kind: v.localizedTypeDescription ?? url.pathExtension.uppercased())
+        }
+        .sorted { a, b in
+            if a.folderRank != b.folderRank { return a.folderRank < b.folderRank }
+            return a.name.localizedStandardCompare(b.name) == .orderedAscending
+        }
+    }
+}

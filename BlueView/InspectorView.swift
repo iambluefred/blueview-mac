@@ -11,7 +11,10 @@ struct InspectorView: View {
         ScrollView {
             if let file = model.focusedFile, let info {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text(file.name).font(.headline).lineLimit(2).textSelection(.enabled)
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(nsImage: FileTypeIcon.icon(for: file.url)).resizable().frame(width: 32, height: 32)
+                        Text(file.name).font(.headline).lineLimit(2).textSelection(.enabled)
+                    }
                     if let rating = info.rating, rating > 0 {
                         HStack(spacing: 2) {
                             ForEach(0..<5) { Image(systemName: $0 < rating ? "star.fill" : "star").foregroundStyle(.yellow) }
@@ -67,6 +70,30 @@ struct InspectorView: View {
                     HStack {
                         Button(tr("Show in Finder", "在 Finder 顯示"), action: model.revealInFinder)
                         Button(tr("Open With…", "用其他 App 開啟"), action: model.openWithDefaultApp)
+                    }
+                    .controlSize(.small)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let entry = model.focusedEntry, !entry.isImage {
+                // 非圖片檔案或資料夾：顯示基本資訊
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(nsImage: entry.isFolder ? FolderIcon.icon(for: entry.url) : FileTypeIcon.icon(for: entry.url))
+                            .resizable().frame(width: 48, height: 48)
+                        Text(entry.name).font(.headline).lineLimit(3).textSelection(.enabled)
+                    }
+                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 7) {
+                        GridRow { Text(tr("Kind", "種類")).foregroundStyle(.secondary); Text(entry.kind) }
+                        if !entry.isFolder {
+                            GridRow { Text(tr("Size", "大小")).foregroundStyle(.secondary); Text(MetadataReader.fileSize(entry.size)) }
+                        }
+                        GridRow { Text(tr("Modified", "修改日期")).foregroundStyle(.secondary); Text(entry.modified.formatted(date: .abbreviated, time: .standard)) }
+                    }
+                    .font(.callout)
+                    HStack {
+                        Button(entry.isFolder ? tr("Open Folder", "開啟資料夾") : tr("Open", "開啟")) { model.activate(entry.url) }
+                        Button(tr("Show in Finder", "在 Finder 顯示")) { NSWorkspace.shared.activateFileViewerSelecting([entry.url]) }
                     }
                     .controlSize(.small)
                 }
