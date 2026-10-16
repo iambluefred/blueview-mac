@@ -28,17 +28,17 @@ struct ListView: View {
                         .foregroundStyle(entry.isImage || entry.isFolder ? .primary : .secondary)
                 }
             }
-            .width(min: 180, ideal: 320)
+            .width(min: 120, ideal: 320)
             TableColumn(tr("Kind", "種類"), value: \.kind) { Text($0.kind).foregroundStyle(.secondary).lineLimit(1) }
-                .width(min: 80, ideal: 130)
+                .width(min: 60, ideal: 130)
             TableColumn(tr("Size", "大小"), value: \.size) { entry in
-                Text(entry.isFolder ? "--" : MetadataReader.fileSize(entry.size)).monospacedDigit().foregroundStyle(.secondary)
+                Text(entry.isFolder || entry.isPackage ? "--" : MetadataReader.fileSize(entry.size)).monospacedDigit().foregroundStyle(.secondary)
             }
-            .width(min: 60, ideal: 80)
+            .width(min: 50, ideal: 80)
             TableColumn(tr("Date Modified", "修改日期"), value: \.modified) { entry in
                 Text(entry.modified.formatted(date: .abbreviated, time: .shortened)).monospacedDigit().foregroundStyle(.secondary)
             }
-            .width(min: 120, ideal: 160)
+            .width(min: 90, ideal: 160)
         }
         .contextMenu(forSelectionType: URL.self) { urls in
             if let url = urls.first {

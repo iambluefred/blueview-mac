@@ -9,8 +9,9 @@ struct BlueViewApp: App {
     var body: some Scene {
         Window("BlueView", id: "main") {
             ContentView(model: model)
+                .onAppear { DispatchQueue.main.async { WindowSizer.keepOnScreen() } }
         }
-        .defaultSize(width: 1180, height: 740)
+        .defaultSize(width: 1100, height: 700)
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -36,6 +37,16 @@ struct BlueViewApp: App {
                     .keyboardShortcut("l").disabled(model.convertTargets.isEmpty)
                 Button(tr("Rotate Right", "向右旋轉")) { model.rotate(.clockwise) }
                     .keyboardShortcut("r").disabled(model.convertTargets.isEmpty)
+            }
+            CommandGroup(after: .windowSize) {
+                Divider()
+                Button(tr("Fit to Screen", "符合螢幕")) { WindowSizer.fitToScreen() }
+                    .keyboardShortcut("f", modifiers: [.command, .option])
+                Menu(tr("Window Size", "視窗大小")) {
+                    Button(tr("Large (1280 × 800)", "大（1280 × 800）")) { WindowSizer.resize(to: CGSize(width: 1280, height: 800)) }
+                    Button(tr("Medium (1024 × 700)", "中（1024 × 700）")) { WindowSizer.resize(to: CGSize(width: 1024, height: 700)) }
+                    Button(tr("Small (800 × 600)", "小（800 × 600）")) { WindowSizer.resize(to: CGSize(width: 800, height: 600)) }
+                }
             }
             CommandMenu(tr("Go", "前往")) {
                 Button(tr("Back", "上一頁"), action: model.goBack).keyboardShortcut("[").disabled(!model.canGoBack)
@@ -67,5 +78,39 @@ struct BlueViewApp: App {
     private func zoom(_ command: ZoomCommand) {
         if model.mode == .grid { model.openViewer() }
         NotificationCenter.default.post(name: .zoomCommand, object: command)
+    }
+}
+
+/// 調整視窗大小：一律限制在螢幕可用範圍內並置中，不會超出螢幕
+enum WindowSizer {
+    @MainActor
+    static var window: NSWindow? { NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first { $0.isVisible } }
+
+    @MainActor
+    static func fitToScreen() {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        window.setFrame(screen.visibleFrame, display: true, animate: true)
+    }
+
+    @MainActor
+    static func resize(to size: CGSize) {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        let area = screen.visibleFrame
+        let width = min(size.width, area.width), height = min(size.height, area.height)
+        let frame = NSRect(x: area.midX - width / 2, y: area.midY - height / 2, width: width, height: height)
+        window.setFrame(frame, display: true, animate: true)
+    }
+
+    /// 開啟時若視窗超出螢幕，縮進螢幕範圍內
+    @MainActor
+    static func keepOnScreen() {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        let area = screen.visibleFrame
+        var frame = window.frame
+        frame.size.width = min(frame.width, area.width)
+        frame.size.height = min(frame.height, area.height)
+        frame.origin.x = min(max(frame.minX, area.minX), area.maxX - frame.width)
+        frame.origin.y = min(max(frame.minY, area.minY), area.maxY - frame.height)
+        if frame != window.frame { window.setFrame(frame, display: true) }
     }
 }

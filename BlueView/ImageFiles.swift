@@ -86,6 +86,8 @@ struct FileEntry: Identifiable, Hashable {
     let name: String
     let isFolder: Bool
     let isImage: Bool
+    /// 套件（例如 .photoslibrary、.app）：Finder 當成一個檔案，但其實是資料夾，大小不準
+    var isPackage = false
     let size: Int64
     let modified: Date
     let kind: String
@@ -104,7 +106,7 @@ extension FolderScanner {
             guard let v = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
             let isFolder = v.isDirectory == true && v.isPackage != true
             return FileEntry(url: url, name: url.lastPathComponent, isFolder: isFolder, isImage: !isFolder && ImageFormats.isImage(url),
-                             size: Int64(v.fileSize ?? 0), modified: v.contentModificationDate ?? .distantPast,
+                             isPackage: v.isPackage == true, size: Int64(v.fileSize ?? 0), modified: v.contentModificationDate ?? .distantPast,
                              kind: v.localizedTypeDescription ?? url.pathExtension.uppercased())
         }
         .sorted { a, b in

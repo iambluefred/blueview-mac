@@ -7,12 +7,28 @@ struct ContentView: View {
     @AppStorage("showInspector") private var showInspector = true
     @AppStorage("thumbSize") private var thumbSize = 180.0
 
+    @State private var windowWidth: CGFloat = 1200
+    /// 可拖曳調整的欄寬（記住使用者的設定）
+    @AppStorage("sidebarWidth") private var sidebarWidth = 200.0
+    @AppStorage("inspectorWidth") private var inspectorWidth = 270.0
+
+    /// 視窗太窄時自動收起面板（不改變使用者的設定，放大後會回來）
+    /// 中間照片區至少要留的寬度
+    private let minContent = 320.0
+    private var sidebarVisible: Bool { showSidebar && model.mode != .viewer && Double(windowWidth) >= sidebarWidth + minContent + 8 }
+    private var inspectorVisible: Bool {
+        showInspector && Double(windowWidth) >= (sidebarVisible ? sidebarWidth : 0) + inspectorWidth + minContent + 16
+    }
+    /// 拖曳時的上限：不能把中間擠到比 minContent 還窄
+    private var sidebarMax: Double { max(140, min(420, Double(windowWidth) - (inspectorVisible ? inspectorWidth : 0) - minContent - 16)) }
+    private var inspectorMax: Double { max(220, min(520, Double(windowWidth) - (sidebarVisible ? sidebarWidth : 0) - minContent - 16)) }
+
     var body: some View {
         // 三欄直接並排（寬度自己控制，13 吋螢幕也不會被裁切）
         HStack(spacing: 0) {
-            if showSidebar && model.mode != .viewer {
-                SidebarView(model: model).frame(width: 210)
-                Divider()
+            if sidebarVisible {
+                SidebarView(model: model).frame(width: sidebarWidth)
+                ResizeHandle(width: $sidebarWidth, range: 140...sidebarMax, defaultWidth: 200, growsToRight: true)
             }
             Group {
                 switch model.mode {
@@ -21,14 +37,19 @@ struct ContentView: View {
                 case .viewer: ViewerView(model: model)
                 }
             }
-            .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
-            if showInspector {
-                Divider()
-                InspectorView(model: model).frame(width: 280)
+            .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
+            if inspectorVisible {
+                ResizeHandle(width: $inspectorWidth, range: 220...inspectorMax, defaultWidth: 270, growsToRight: false)
+                InspectorView(model: model).frame(width: inspectorWidth)
             }
         }
+        .background(GeometryReader { g in
+            Color.clear
+                .onAppear { windowWidth = g.size.width }
+                .onChange(of: g.size.width) { windowWidth = g.size.width }
+        })
         .safeAreaInset(edge: .bottom, spacing: 0) { StatusBar(model: model, thumbSize: $thumbSize) }
-        .frame(minWidth: 860, minHeight: 520)
+        .frame(minWidth: 640, minHeight: 420)
         .navigationTitle(model.mode == .viewer ? (model.focusedFile?.name ?? "BlueView") : (model.folder?.lastPathComponent ?? "BlueView"))
         .navigationSubtitle(model.folder?.path ?? "")
         .sheet(isPresented: $model.showConvert) { ConvertView(model: model) }
@@ -162,5 +183,43 @@ private struct StatusBar: View {
         .frame(height: 28)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
+    }
+}
+
+// MARK: - 可拖曳的分隔線
+
+/// 拖曳調整旁邊欄位的寬度；滑鼠移上去顯示左右箭頭；雙擊恢復預設寬度
+private struct ResizeHandle: View {
+    @Binding var width: Double
+    let range: ClosedRange<Double>
+    let defaultWidth: Double
+    /// true：欄位在分隔線左邊（往右拖變寬）；false：欄位在右邊（往左拖變寬）
+    let growsToRight: Bool
+    @State private var startWidth: Double?
+    @State private var hovering = false
+
+    var body: some View {
+        Rectangle()
+            .fill(hovering || startWidth != nil ? Color.accentColor.opacity(0.6) : Color(nsColor: .separatorColor))
+            .frame(width: hovering || startWidth != nil ? 3 : 1)
+            .frame(maxHeight: .infinity)
+            .padding(.horizontal, 3)          // 加寬可以點到的範圍
+            .contentShape(Rectangle())
+            .onHover { inside in
+                hovering = inside
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { value in
+                        let start = startWidth ?? width
+                        startWidth = start
+                        let delta = Double(value.translation.width) * (growsToRight ? 1 : -1)
+                        width = min(max(start + delta, range.lowerBound), range.upperBound)
+                    }
+                    .onEnded { _ in startWidth = nil }
+            )
+            .onTapGesture(count: 2) { withAnimation { width = defaultWidth } }
+            .help(tr("Drag to resize · double-click to reset", "拖曳調整寬度・雙擊恢復預設"))
     }
 }
