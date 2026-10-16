@@ -1,0 +1,45 @@
+name: BlueView
+options:
+  bundleIdPrefix: com.iambluefred
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    ENABLE_HARDENED_RUNTIME: NO
+targets:
+  BlueView:
+    type: application
+    platform: macOS
+    sources: [BlueView]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.iambluefred.blueview
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_CFBundleDisplayName: BlueView
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.photography
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+  BlueViewTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [BlueViewTests]
+    dependencies:
+      - target: BlueView
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  BlueView:
+    build:
+      targets:
+        BlueView: all
+        BlueViewTests: [test]
+    test:
+      targets: [BlueViewTests]
+    run:
+      config: Debug

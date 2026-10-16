@@ -1,0 +1,86 @@
+#!/bin/bash
+# 提交前檢查：這次要提交的內容裡有沒有金鑰、密碼、Token 或敏感檔案，有就擋下來。
+#
+# 誤判時：在那一行加上註解 secret-scan:allow，或把檔案路徑寫進 .secretsignore（一行一個，可用 * 萬用字元）。
+# 真的要略過檢查（不建議）：git commit --no-verify
+
+set -u
+RED=$'\033[31m'; YELLOW=$'\033[33m'; BOLD=$'\033[1m'; RESET=$'\033[0m'
+
+# 金鑰與 Token 的格式
+PATTERNS=(
+  'BEGIN (RSA |OPENSSH |EC |DSA |PGP |ENCRYPTED )?PRIVATE KEY'   # 私密金鑰
+  'ssh-(rsa|ed25519|dss) AAAA[0-9A-Za-z+/]{40,}'                  # SSH 金鑰內容
+  'sk-ant-[A-Za-z0-9_-]{20,}'                                     # Anthropic
+  'sk-(proj-)?[A-Za-z0-9_-]{32,}'                                 # OpenAI
+  'gh[pousr]_[A-Za-z0-9]{30,}'                                    # GitHub Token
+  'github_pat_[A-Za-z0-9_]{40,}'                                  # GitHub Fine-grained Token
+  'AKIA[0-9A-Z]{16}'                                              # AWS Access Key
+  'AIza[0-9A-Za-z_-]{35}'                                         # Google API Key
+  'ya29\.[0-9A-Za-z_-]{20,}'                                      # Google OAuth Token
+  'xox[abprs]-[A-Za-z0-9-]{10,}'                                  # Slack
+  'sk_live_[0-9A-Za-z]{20,}'                                      # Stripe
+  'eyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}'  # JWT
+  # 寫死在程式裡的密碼／金鑰字串，例如 password = "abcd1234"（變數名稱本身不算）
+  '(api[_-]?key|apikey|secret|token|passwd|password|pwd|access[_-]?key|private[_-]?key)[A-Za-z0-9_]*["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"'[:space:]]{8,}["'"'"']'
+)
+
+# 不該進版本控制的檔案
+SENSITIVE_FILES='(^|/)(\.env(\..*)?|id_rsa|id_dsa|id_ecdsa|id_ed25519|\.netrc|\.npmrc|\.pypirc|credentials(\.json)?|.*\.(pem|key|p12|pfx|keychain|keychain-db|mobileprovision|cer|jks|keystore|ovpn))$'
+ALLOW_FILES='(^|/)\.env\.(example|sample|template)$'
+
+ignored() {
+  [ -f .secretsignore ] || return 1
+  local f="$1" pattern
+  while IFS= read -r pattern || [ -n "$pattern" ]; do
+    [ -z "$pattern" ] && continue
+    case "$pattern" in \#*) continue ;; esac
+    # shellcheck disable=SC2053
+    [[ "$f" == $pattern ]] && return 0
+  done < .secretsignore
+  return 1
+}
+
+found=0
+report() { found=1; printf '%s\n' "$1"; }
+
+# 1. 檔名
+while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  ignored "$file" && continue
+  if [[ "$file" =~ $SENSITIVE_FILES ]] && ! [[ "$file" =~ $ALLOW_FILES ]]; then
+    report "${RED}✗ 敏感檔案${RESET}  $file"
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+# 2. 新增的內容：整理成「檔名<TAB>行號<TAB>內容」，再一次比對全部格式（大提交也很快）
+grep_args=()
+for pattern in "${PATTERNS[@]}"; do grep_args+=(-e "$pattern"); done
+
+while IFS=$'\t' read -r file line_no content; do
+  [ -z "$file" ] && continue
+  ignored "$file" && continue
+  [[ "$content" == *secret-scan:allow* ]] && continue
+  shown="$(printf '%s' "$content" | sed -E 's/^[[:space:]]+//' | cut -c1-100)"
+  report "${RED}✗ 疑似金鑰／密碼${RESET}  ${BOLD}$file:$line_no${RESET}  $shown"
+done < <(
+  git diff --cached -U0 --no-color --diff-filter=ACMR -- . ':(exclude).githooks/*' \
+    ':(exclude)*.png' ':(exclude)*.jpg' ':(exclude)*.jpeg' ':(exclude)*.onnx' ':(exclude)*.pdf' |
+  awk '
+    /^\+\+\+ b\// { file = substr($0, 7); next }
+    /^\+\+\+ /    { file = ""; next }
+    /^@@ /        { match($0, /\+[0-9]+/); line = substr($0, RSTART + 1, RLENGTH - 1) + 0; next }
+    /^-/          { next }
+    /^\+/         { if (file != "") printf "%s\t%d\t%s\n", file, line, substr($0, 2); line++; next }
+  ' |
+  grep -E "${grep_args[@]}"
+)
+
+if [ "$found" -ne 0 ]; then
+  echo
+  echo "${RED}${BOLD}提交已擋下：發現可能是金鑰、密碼或敏感檔案。${RESET}"
+  echo "${YELLOW}請先移除它們（改用環境變數或鑰匙圈），再重新 git add 與提交。${RESET}"
+  echo "誤判的話：在那一行加上註解 secret-scan:allow，或把檔案路徑寫進 .secretsignore。"
+  exit 1
+fi
+exit 0
