@@ -123,12 +123,12 @@ final class RotateUndoTests: XCTestCase {
         for _ in 0..<100 where model.undoTitle == nil { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertEqual(orientation(), 6)
 
-        model.undoRotate()
+        model.undo()
         for _ in 0..<100 where model.redoTitle == nil { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertEqual(orientation(), 1, "⌘Z 要轉回原本的方向")
         XCTAssertNil(model.undoTitle)
 
-        model.redoRotate()
+        model.redo()
         for _ in 0..<100 where model.undoTitle == nil { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertEqual(orientation(), 6, "⇧⌘Z 要再轉回去")
     }

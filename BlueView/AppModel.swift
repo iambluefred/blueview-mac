@@ -82,7 +82,7 @@ final class AppModel {
                 self.subfolders = subs
                 self.entries = all
                 if self.focused == nil { self.focused = self.files.first?.url }
-                self.selection = self.selection.filter { s in self.files.contains { $0.url == s } }
+                self.selection = self.selection.filter { s in all.contains { $0.url == s } }
             }
         }
     }
@@ -209,14 +209,88 @@ final class AppModel {
         if let focused { NSWorkspace.shared.open(focused) }
     }
 
+    // MARK: - 還原與重做
+
+    /// 可以還原的動作：旋轉、丟到垃圾桶
+    enum Edit {
+        case rotate([URL], Rotator.Direction)
+        case trash([TrashedItem])
+
+        var count: Int {
+            switch self {
+            case .rotate(let urls, _): urls.count
+            case .trash(let items): items.count
+            }
+        }
+    }
+
+    /// 丟到垃圾桶的檔案：原本的位置與在垃圾桶裡的位置
+    struct TrashedItem: Equatable {
+        let original: URL
+        let trashed: URL
+    }
+
+    /// 做過的動作，可以用 ⌘Z 還原、⇧⌘Z 重做
+    private(set) var undoStack: [Edit] = []
+    private(set) var redoStack: [Edit] = []
+
+    var undoTitle: String? {
+        undoStack.last.map { edit in
+            switch edit {
+            case .rotate: tr("Undo Rotate (\(edit.count))", "還原旋轉（\(edit.count) 張）")
+            case .trash: tr("Undo Move to Trash (\(edit.count))", "還原丟到垃圾桶（\(edit.count) 個）")
+            }
+        }
+    }
+
+    var redoTitle: String? {
+        redoStack.last.map { edit in
+            switch edit {
+            case .rotate: tr("Redo Rotate (\(edit.count))", "重做旋轉（\(edit.count) 張）")
+            case .trash: tr("Redo Move to Trash (\(edit.count))", "重做丟到垃圾桶（\(edit.count) 個）")
+            }
+        }
+    }
+
+    func undo() {
+        guard let last = undoStack.popLast() else { return }
+        switch last {
+        case .rotate(let urls, let direction): apply(urls, opposite(direction), record: .redo, original: direction)
+        case .trash(let items): restore(items)
+        }
+    }
+
+    func redo() {
+        guard let last = redoStack.popLast() else { return }
+        switch last {
+        case .rotate(let urls, let direction): apply(urls, direction, record: .undoKeepRedo)
+        case .trash(let items): trash(items.map(\.original), record: .undoKeepRedo)
+        }
+    }
+
+    private enum Record { case undo, redo, undoKeepRedo }
+
+    private func record(_ edit: Edit, _ record: Record) {
+        switch record {
+        case .undo:
+            undoStack.append(edit)
+            redoStack.removeAll()
+        case .redo:
+            redoStack.append(edit)
+        case .undoKeepRedo:
+            undoStack.append(edit)
+        }
+    }
+
+    private func showFailures(_ title: String, _ failures: [String]) {
+        guard !failures.isEmpty else { return }
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = failures.prefix(12).joined(separator: "\n")
+        alert.runModal()
+    }
+
     // MARK: - 旋轉
-
-    /// 已旋轉的紀錄，可以用 ⌘Z 還原、⇧⌘Z 重做
-    private(set) var undoStack: [(urls: [URL], direction: Rotator.Direction)] = []
-    private(set) var redoStack: [(urls: [URL], direction: Rotator.Direction)] = []
-
-    var undoTitle: String? { undoStack.last.map { tr("Undo Rotate (\($0.urls.count))", "還原旋轉（\($0.urls.count) 張）") } }
-    var redoTitle: String? { redoStack.last.map { tr("Redo Rotate (\($0.urls.count))", "重做旋轉（\($0.urls.count) 張）") } }
 
     /// 旋轉選取的照片（看圖模式下旋轉目前這張）
     func rotate(_ direction: Rotator.Direction) {
@@ -224,18 +298,6 @@ final class AppModel {
         guard !targets.isEmpty else { return }
         apply(targets, direction, record: .undo)
     }
-
-    func undoRotate() {
-        guard let last = undoStack.popLast() else { return }
-        apply(last.urls, opposite(last.direction), record: .redo, original: last.direction)
-    }
-
-    func redoRotate() {
-        guard let last = redoStack.popLast() else { return }
-        apply(last.urls, last.direction, record: .undoKeepRedo)
-    }
-
-    private enum Record { case undo, redo, undoKeepRedo }
 
     private func opposite(_ d: Rotator.Direction) -> Rotator.Direction { d == .clockwise ? .counterClockwise : .clockwise }
 
@@ -252,31 +314,111 @@ final class AppModel {
                 }
             }
             await ImagePipeline.shared.invalidate(targets)
-            let message = failures.joined(separator: "\n")
-            let rotated = done
+            let rotated = done, failed = failures
             await MainActor.run {
                 if !rotated.isEmpty {
-                    switch record {
-                    case .undo:
-                        self.undoStack.append((rotated, direction))
-                        self.redoStack.removeAll()
-                    case .redo:
-                        self.redoStack.append((rotated, original ?? direction))
-                    case .undoKeepRedo:
-                        self.undoStack.append((rotated, direction))
-                    }
+                    self.record(.rotate(rotated, record == .redo ? (original ?? direction) : direction), record)
                     self.statusMessage = tr("Rotated \(rotated.count) photo(s). ⌘Z to undo.", "已旋轉 \(rotated.count) 張，可按 ⌘Z 還原。")
                 }
                 self.contentVersion += 1
                 self.reload()
-                if !message.isEmpty {
-                    let alert = NSAlert()
-                    alert.messageText = tr("Some photos were not rotated", "有些照片沒有旋轉")
-                    alert.informativeText = message
-                    alert.runModal()
-                }
+                self.showFailures(tr("Some photos were not rotated", "有些照片沒有旋轉"), failed)
             }
         }
+    }
+
+    // MARK: - 丟到垃圾桶
+
+    /// 要丟到垃圾桶的檔案：看圖模式是目前這張；列表是選取的項目（含非圖片）；縮圖是選取的照片
+    var trashTargets: [URL] {
+        switch mode {
+        case .viewer: [focused].compactMap { $0 }
+        case .list: entries.map(\.url).filter { selection.contains($0) }
+        case .grid: convertTargets
+        }
+    }
+
+    /// 把選取的檔案移到垃圾桶（不會永久刪除，⌘Z 可以搬回原位）
+    func moveToTrash() {
+        let targets = trashTargets
+        guard !targets.isEmpty else { return }
+        trash(targets, record: .undo)
+    }
+
+    private func trash(_ targets: [URL], record: Record) {
+        Task.detached(priority: .userInitiated) {
+            var failures: [String] = []
+            var items: [TrashedItem] = []
+            for url in targets {
+                do {
+                    var result: NSURL?
+                    try FileManager.default.trashItem(at: url, resultingItemURL: &result)
+                    if let result { items.append(TrashedItem(original: url, trashed: result as URL)) }
+                } catch {
+                    failures.append("\(url.lastPathComponent)：\(error.localizedDescription)")
+                }
+            }
+            await ImagePipeline.shared.invalidate(targets)
+            let trashed = items, failed = failures
+            await MainActor.run {
+                if !trashed.isEmpty {
+                    self.removeFromListing(trashed.map(\.original))
+                    self.record(.trash(trashed), record)
+                    self.statusMessage = tr("Moved \(trashed.count) item(s) to the Trash. ⌘Z to undo.", "已將 \(trashed.count) 個丟到垃圾桶，可按 ⌘Z 還原。")
+                }
+                self.reload()
+                self.showFailures(tr("Some items were not moved to the Trash", "有些檔案沒有丟到垃圾桶"), failed)
+            }
+        }
+    }
+
+    /// 從垃圾桶搬回原本的位置
+    private func restore(_ items: [TrashedItem]) {
+        Task.detached(priority: .userInitiated) {
+            var failures: [String] = []
+            var restored: [TrashedItem] = []
+            for item in items {
+                do {
+                    try FileManager.default.moveItem(at: item.trashed, to: item.original)
+                    restored.append(item)
+                } catch {
+                    failures.append("\(item.original.lastPathComponent)：\(error.localizedDescription)")
+                }
+            }
+            let back = restored, failed = failures
+            await MainActor.run {
+                if !back.isEmpty {
+                    self.record(.trash(back), .redo)
+                    let urls = back.map(\.original)
+                    self.selection = Set(urls)
+                    self.focused = urls.first
+                    self.statusMessage = tr("Restored \(back.count) item(s) from the Trash.", "已從垃圾桶還原 \(back.count) 個。")
+                }
+                self.reload()
+                self.showFailures(tr("Some items could not be put back", "有些檔案無法搬回原位"), failed)
+            }
+        }
+    }
+
+    /// 刪除後立刻從畫面拿掉，選取移到相鄰的檔案；看圖模式沒有照片了就回到縮圖
+    private func removeFromListing(_ removed: [URL]) {
+        let gone = Set(removed)
+        let order = mode == .list ? entries.map(\.url) : files.map(\.url)
+        let next = Self.neighbor(of: gone, in: order)
+        files.removeAll { gone.contains($0.url) }
+        entries.removeAll { gone.contains($0.url) }
+        subfolders.removeAll { gone.contains($0) }
+        selection = next.map { [$0] } ?? []
+        focused = next
+        if mode == .viewer {
+            if next == nil { closeViewer() } else { prefetchAround() }
+        }
+    }
+
+    /// 刪除後要選的檔案：最後一個被刪的後面那一個；後面沒有就取前面最近的一個
+    static func neighbor(of removed: Set<URL>, in order: [URL]) -> URL? {
+        guard let last = order.lastIndex(where: removed.contains) else { return nil }
+        return order[(last + 1)...].first { !removed.contains($0) } ?? order[..<last].last { !removed.contains($0) }
     }
 
     // MARK: - 轉檔

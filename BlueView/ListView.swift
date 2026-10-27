@@ -45,6 +45,11 @@ struct ListView: View {
                 Button(tr("Open", "開啟")) { model.activate(url) }
                 Button(tr("Open with Default App", "用預設 App 開啟")) { NSWorkspace.shared.open(url) }
                 Button(tr("Show in Finder", "在 Finder 中顯示")) { NSWorkspace.shared.activateFileViewerSelecting(Array(urls)) }
+                Divider()
+                Button(tr("Move to Trash", "丟到垃圾桶")) {
+                    model.selection = urls
+                    model.moveToTrash()
+                }
             }
         } primaryAction: { urls in
             // 點兩下或按 Return

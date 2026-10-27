@@ -21,12 +21,15 @@ struct BlueViewApp: App {
                     .disabled(model.convertTargets.isEmpty || model.isConverting)
                 Divider()
                 Button(tr("Show in Finder", "在 Finder 中顯示"), action: model.revealInFinder).keyboardShortcut("r", modifiers: [.command, .shift])
+                Button(tr("Move to Trash", "丟到垃圾桶"), action: model.moveToTrash)
+                    .keyboardShortcut(.delete, modifiers: [.command])
+                    .disabled(model.trashTargets.isEmpty || model.showConvert)
                 Button(tr("Reload Folder", "重新整理資料夾"), action: model.reload).keyboardShortcut("r", modifiers: [.command, .option])
             }
             CommandGroup(replacing: .undoRedo) {
-                Button(model.undoTitle ?? tr("Undo", "還原"), action: model.undoRotate)
+                Button(model.undoTitle ?? tr("Undo", "還原"), action: model.undo)
                     .keyboardShortcut("z").disabled(model.undoTitle == nil)
-                Button(model.redoTitle ?? tr("Redo", "重做"), action: model.redoRotate)
+                Button(model.redoTitle ?? tr("Redo", "重做"), action: model.redo)
                     .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(model.redoTitle == nil)
             }
             CommandGroup(after: .textEditing) {

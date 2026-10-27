@@ -51,6 +51,11 @@ struct GridView: View {
                                 Divider()
                                 Button(tr("Show in Finder", "在 Finder 中顯示")) { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }
                                 Button(tr("Open with Default App", "用預設 App 開啟")) { NSWorkspace.shared.open(file.url) }
+                                Divider()
+                                Button(tr("Move to Trash", "丟到垃圾桶")) {
+                                    if !model.selection.contains(file.url) { model.select(file.url) }
+                                    model.moveToTrash()
+                                }
                             }
                     }
                 }

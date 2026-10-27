@@ -40,6 +40,14 @@ struct ViewerView: View {
                 .environment(\.colorScheme, .dark)
             }
         }
+        .contextMenu {
+            Button(tr("Rotate Left", "向左旋轉")) { model.rotate(.counterClockwise) }
+            Button(tr("Rotate Right", "向右旋轉")) { model.rotate(.clockwise) }
+            Divider()
+            Button(tr("Show in Finder", "在 Finder 中顯示")) { model.revealInFinder() }
+            Divider()
+            Button(tr("Move to Trash", "丟到垃圾桶")) { model.moveToTrash() }
+        }
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
